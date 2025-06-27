@@ -11,11 +11,13 @@ const SupabaseContext = createContext<{
   user: any
   profile: any
   isLoading: boolean
+  refreshProfile: () => Promise<void>
 }>({
   supabase: createClientSupabase(),
   user: null,
   profile: null,
   isLoading: true,
+  refreshProfile: async () => {},
 })
 
 export function SupabaseProvider({ children }: { children: React.ReactNode }) {
@@ -25,6 +27,43 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
   const pathname = usePathname()
+
+  const fetchProfile = async (userId: string) => {
+    try {
+      const { data, error } = await supabase.from("profiles").select().eq("id", userId).single()
+
+      if (error) {
+        console.error("Error fetching profile:", error)
+        return
+      }
+
+      setProfile(data)
+
+      // Only create profile if it doesn't exist and we have a user
+      if (!data && userId) {
+        const { error: insertError } = await supabase.from("profiles").insert({
+          id: userId,
+          username: `user_${userId.substring(0, 8)}`,
+        })
+
+        if (insertError) {
+          console.error("Error creating profile:", insertError)
+        } else {
+          // Fetch the newly created profile
+          const { data: newProfile } = await supabase.from("profiles").select().eq("id", userId).single()
+          setProfile(newProfile)
+        }
+      }
+    } catch (error) {
+      console.error("Profile fetch error:", error)
+    }
+  }
+
+  const refreshProfile = async () => {
+    if (user) {
+      await fetchProfile(user.id)
+    }
+  }
 
   useEffect(() => {
     // Initial session check - optimized
@@ -60,7 +99,7 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
           }
         }
       } catch (error) {
-        console.error("Session check error:", error)
+        console.error("[SupabaseProvider] Session check error:", error)
       } finally {
         setIsLoading(false)
       }
@@ -88,38 +127,7 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
     }
   }, [supabase, router, pathname, profile])
 
-  const fetchProfile = async (userId: string) => {
-    try {
-      const { data, error } = await supabase.from("profiles").select().eq("id", userId).single()
-
-      if (error) {
-        console.error("Error fetching profile:", error)
-        return
-      }
-
-      setProfile(data)
-
-      // Only create profile if it doesn't exist and we have a user
-      if (!data && userId) {
-        const { error: insertError } = await supabase.from("profiles").insert({
-          id: userId,
-          username: `user_${userId.substring(0, 8)}`,
-        })
-
-        if (insertError) {
-          console.error("Error creating profile:", insertError)
-        } else {
-          // Fetch the newly created profile
-          const { data: newProfile } = await supabase.from("profiles").select().eq("id", userId).single()
-          setProfile(newProfile)
-        }
-      }
-    } catch (error) {
-      console.error("Profile fetch error:", error)
-    }
-  }
-
-  return <SupabaseContext.Provider value={{ supabase, user, profile, isLoading }}>{children}</SupabaseContext.Provider>
+  return <SupabaseContext.Provider value={{ supabase, user, profile, isLoading, refreshProfile }}>{children}</SupabaseContext.Provider>
 }
 
 export const useSupabase = () => {

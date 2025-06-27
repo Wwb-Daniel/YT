@@ -23,13 +23,13 @@ export function AuthForm() {
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
-
+    
     try {
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
-
+      
       if (error) {
         throw error
       }

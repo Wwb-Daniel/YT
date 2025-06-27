@@ -15,7 +15,7 @@ interface ProfileFormProps {
 }
 
 export function ProfileForm({ profile }: ProfileFormProps) {
-  const { supabase, user } = useSupabase()
+  const { supabase, user, refreshProfile } = useSupabase()
   const { toast } = useToast()
   const [isLoading, setIsLoading] = useState(false)
   const [username, setUsername] = useState(profile?.username || "")
@@ -29,21 +29,34 @@ export function ProfileForm({ profile }: ProfileFormProps) {
     setIsLoading(true)
 
     try {
-      const { error } = await supabase.from("profiles").upsert({
-        id: user.id,
-        username,
-        avatar_url: avatarUrl,
-      })
+      console.log("Updating profile:", { id: user.id, username, avatar_url: avatarUrl })
+      
+      const { error, data } = await supabase
+        .from("profiles")
+        .upsert({
+          id: user.id,
+          username,
+          avatar_url: avatarUrl,
+        })
+        .select()
+        .single()
 
       if (error) {
+        console.error("Profile update error:", error)
         throw error
       }
+
+      console.log("Profile updated successfully:", data)
+
+      // Refresh the profile state
+      await refreshProfile()
 
       toast({
         title: "Profile updated",
         description: "Your profile has been updated successfully",
       })
     } catch (error: any) {
+      console.error("Profile update failed:", error)
       toast({
         title: "Error",
         description: error.message || "Failed to update profile",
