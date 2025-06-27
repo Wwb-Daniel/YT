@@ -1,0 +1,10 @@
+{
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/(.*)", "destination": "/" }
+  ],
+  "redirects": [],
+  "headers": [],
+  "cleanUrls": true,
+  "trailingSlash": false
+} 
