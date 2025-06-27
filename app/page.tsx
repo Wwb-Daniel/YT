@@ -2,6 +2,7 @@ import { VideoGrid } from "@/components/video-grid"
 import { Sidebar } from "@/components/sidebar"
 import { Suspense } from "react"
 import { Skeleton } from "@/components/ui/skeleton"
+import type { Profile, ProfileFormData } from "@/lib/models/profile"
 
 export default async function Home() {
   return (
