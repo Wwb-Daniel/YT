@@ -3,12 +3,8 @@
 import type React from "react"
 
 import { createContext, useContext, useEffect, useState } from "react"
-import { createClient } from "@supabase/supabase-js"
 import { useRouter, usePathname } from "next/navigation"
-
-const supabaseUrl = "https://agnfqvcsagacsfuqrxzd.supabase.co"
-const supabaseKey =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFnbmZxdmNzYWdhY3NmdXFyeHpkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA2NjE1NTMsImV4cCI6MjA2NjIzNzU1M30.NbUWZ6tBS7wDrOvcFS5s6-LMu_3VM13w87y2rkt0_7M"
+import { createClientSupabase } from "@/lib/supabase-client"
 
 const SupabaseContext = createContext<{
   supabase: any
@@ -16,14 +12,14 @@ const SupabaseContext = createContext<{
   profile: any
   isLoading: boolean
 }>({
-  supabase: createClient(supabaseUrl, supabaseKey),
+  supabase: createClientSupabase(),
   user: null,
   profile: null,
   isLoading: true,
 })
 
 export function SupabaseProvider({ children }: { children: React.ReactNode }) {
-  const [supabase] = useState(() => createClient(supabaseUrl, supabaseKey))
+  const [supabase] = useState(() => createClientSupabase())
   const [user, setUser] = useState<any>(null)
   const [profile, setProfile] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)

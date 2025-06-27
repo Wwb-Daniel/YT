@@ -68,7 +68,7 @@ export function VideoGrid() {
         console.log(`Cargando videos página ${pageNumber}, región: ${userRegion || "unknown"}`)
 
         // Obtener videos de la base de datos
-        let dbVideosWithProfiles = []
+        let dbVideosWithProfiles: any[] = []
         try {
           const supabase = createClientSupabase()
           const { data: dbVideos, error: dbError } = await supabase
@@ -117,7 +117,7 @@ export function VideoGrid() {
         }
 
         // Obtener videos de YouTube (ahora son datos de respaldo)
-        let youtubeVideos = []
+        let youtubeVideos: any[] = []
         try {
           // Pasar el número de página a la función para obtener diferentes videos
           const ytVideos = await getPopularVideos(8, userRegion || undefined, pageNumber)
@@ -294,6 +294,7 @@ export function VideoGrid() {
                 src={video.thumbnailUrl || "/placeholder.svg"}
                 alt={video.title}
                 fill
+                priority={index === 0}
                 className="object-cover transition-transform group-hover:scale-105"
               />
             </div>

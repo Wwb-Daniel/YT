@@ -8,35 +8,16 @@ const supabaseKey =
 let clientInstance: ReturnType<typeof createClient> | null = null
 
 export function createClientSupabase() {
-  try {
-    if (typeof window === "undefined") {
-      // Server-side: create a new instance each time to avoid conflicts
-      return createClient(supabaseUrl, supabaseKey)
-    }
-
-    // Client-side: use singleton pattern
-    if (!clientInstance) {
-      clientInstance = createClient(supabaseUrl, supabaseKey)
-      console.log("Supabase client created successfully")
-    }
-
-    return clientInstance
-  } catch (error) {
-    console.error("Error creating Supabase client:", error)
-    // Return a minimal client that won't crash but will log errors
-    return {
-      from: () => ({
-        select: () => ({
-          eq: () => ({
-            range: () => ({
-              then: () => Promise.resolve({ data: [], error: null }),
-            }),
-            order: () => ({
-              limit: () => Promise.resolve({ data: [], error: null }),
-            }),
-          }),
-        }),
-      }),
-    } as any
+  // Always use singleton pattern to avoid multiple instances
+  if (!clientInstance) {
+    clientInstance = createClient(supabaseUrl, supabaseKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    })
   }
+
+  return clientInstance
 }
