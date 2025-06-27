@@ -60,7 +60,7 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
           }
         }
       } catch (error) {
-        console.error("Session check error:", error)
+        console.error("[SupabaseProvider] Session check error:", error)
       } finally {
         setIsLoading(false)
       }
