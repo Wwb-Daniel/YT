@@ -11,7 +11,7 @@ const supabaseKey =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFnbmZxdmNzYWdhY3NmdXFyeHpkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA2NjE1NTMsImV4cCI6MjA2NjIzNzU1M30.NbUWZ6tBS7wDrOvcFS5s6-LMu_3VM13w87y2rkt0_7M"
 
 const SupabaseContext = createContext<{
-  supabase: ReturnType<typeof createClient>
+  supabase: any
   user: any
   profile: any
   isLoading: boolean
@@ -31,9 +31,8 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
   useEffect(() => {
-    // Initial session check
+    // Initial session check - optimized
     const checkSession = async () => {
-      setIsLoading(true)
       try {
         const {
           data: { session },
@@ -41,12 +40,15 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
 
         if (session?.user) {
           setUser(session.user)
-          await fetchProfile(session.user.id)
+          // Only fetch profile if we don't have it
+          if (!profile) {
+            await fetchProfile(session.user.id)
+          }
         } else {
           setUser(null)
           setProfile(null)
 
-          // Redirect to login if trying to access protected routes
+          // Only redirect if on protected routes and not already on login
           const protectedRoutes = [
             "/profile",
             "/upload",
@@ -57,7 +59,7 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
             "/liked",
             "/watch-later",
           ]
-          if (protectedRoutes.includes(pathname)) {
+          if (protectedRoutes.includes(pathname) && pathname !== "/login") {
             router.push("/login")
           }
         }
@@ -88,7 +90,7 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
     return () => {
       subscription.unsubscribe()
     }
-  }, [supabase, router, pathname])
+  }, [supabase, router, pathname, profile])
 
   const fetchProfile = async (userId: string) => {
     try {
@@ -101,8 +103,8 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
 
       setProfile(data)
 
-      // Create profile if it doesn't exist
-      if (!data) {
+      // Only create profile if it doesn't exist and we have a user
+      if (!data && userId) {
         const { error: insertError } = await supabase.from("profiles").insert({
           id: userId,
           username: `user_${userId.substring(0, 8)}`,
@@ -113,7 +115,6 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
         } else {
           // Fetch the newly created profile
           const { data: newProfile } = await supabase.from("profiles").select().eq("id", userId).single()
-
           setProfile(newProfile)
         }
       }
