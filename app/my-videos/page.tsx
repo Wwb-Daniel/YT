@@ -2,8 +2,11 @@ import { redirect } from "next/navigation"
 import { createServerClient } from "@/lib/supabase-server"
 import { UserUploadedVideos } from "@/components/user-uploaded-videos"
 
+// Force dynamic rendering to avoid prerender issues
+export const dynamic = "force-dynamic"
+
 export default async function MyVideosPage() {
-  const supabase = createServerClient()
+  const supabase = await createServerClient()
   const {
     data: { session },
   } = await supabase.auth.getSession()

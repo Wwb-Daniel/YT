@@ -7,6 +7,9 @@ import { createServerClient } from "@/lib/supabase-server"
 import { notFound } from "next/navigation"
 import { isUUID } from "@/lib/utils"
 
+// Force dynamic rendering to avoid prerender issues
+export const dynamic = "force-dynamic"
+
 export default async function WatchPage({ params }: { params: { id: string } }) {
   const videoId = params.id
   const supabase = await createServerClient()
