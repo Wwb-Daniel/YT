@@ -1,6 +1,7 @@
 import { Suspense } from "react"
 import type { Metadata } from "next"
 import { VideoPlayer } from "@/components/video-player"
+import { VideoInfo } from "@/components/video-info"
 import { CommentSection } from "@/components/comment-section"
 import { VideoRecommendations } from "@/components/video-recommendations"
 import { ShareButton } from "@/components/share-button"
@@ -375,6 +376,9 @@ function VideoLayout({
                 />
               </div>
             </Card>
+
+            {/* Video Info (Like/Dislike/Share) */}
+            <VideoInfo video={video} youtubeDetails={youtubeDetails} isYoutubeVideo={isYoutubeOnly} />
 
             {/* Video Info */}
             <Card>

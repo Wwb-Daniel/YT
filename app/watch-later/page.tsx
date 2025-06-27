@@ -37,10 +37,9 @@ export default function WatchLaterPage() {
     try {
       const supabase = createClientSupabase()
 
-      // For now, we'll just show liked videos as a placeholder
-      // In a real app, you would have a separate watch_later table
+      // Ahora sí, mostramos los videos de watch_later
       const { data } = await supabase
-        .from("likes")
+        .from("watch_later")
         .select(`
           *,
           videos (
