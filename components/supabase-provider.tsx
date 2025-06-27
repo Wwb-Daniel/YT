@@ -77,7 +77,7 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
           setUser(session.user)
           // Only fetch profile if we don't have it
           if (!profile) {
-            await fetchProfile(session.user.id)
+          await fetchProfile(session.user.id)
           }
         } else {
           setUser(null)

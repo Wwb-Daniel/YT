@@ -96,7 +96,7 @@ export function VideoRecommendations({ videoId, youtubeId }: VideoRecommendation
       const supabase = createClientSupabase()
 
       // Obtener videos de la base de datos
-      let dbVideos = []
+      let dbVideos: any[] = []
       try {
         const { data, error } = await supabase
           .from("videos")
@@ -116,7 +116,7 @@ export function VideoRecommendations({ videoId, youtubeId }: VideoRecommendation
 
       // Obtener perfiles para los videos
       const userIds = dbVideos.map((video) => video.user_id).filter(Boolean)
-      let profiles = []
+      let profiles: any[] = []
 
       if (userIds.length > 0) {
         try {
@@ -132,6 +132,7 @@ export function VideoRecommendations({ videoId, youtubeId }: VideoRecommendation
         const profile = profiles.find((p) => p.id === video.user_id)
         return {
           ...video,
+          video_url: video.video_url,
           profiles: profile ? { username: profile.username } : null,
           source: "database",
         }
@@ -142,7 +143,7 @@ export function VideoRecommendations({ videoId, youtubeId }: VideoRecommendation
       if (youtubeId && pageNumber === 1) {
         try {
           const ytVideos = await getRelatedVideos(youtubeId)
-          youtubeVideos = ytVideos.map((video) => ({
+          youtubeVideos = ytVideos.map((video: any) => ({
             id: video.id.videoId,
             title: video.snippet.title,
             thumbnail_url: video.snippet.thumbnails.high.url,
@@ -150,6 +151,7 @@ export function VideoRecommendations({ videoId, youtubeId }: VideoRecommendation
             published_at: video.snippet.publishedAt,
             isYoutubeVideo: true,
             source: "youtube",
+            video_url: `https://www.youtube.com/watch?v=${video.id.videoId}`,
           }))
         } catch (ytError) {
           console.error("Error fetching YouTube recommendations:", ytError)

@@ -8,7 +8,7 @@ let clientInstance: ReturnType<typeof createClient> | null = null
 
 export function createClientSupabase() {
   // Always use singleton pattern to avoid multiple instances
-  if (!clientInstance) {
+    if (!clientInstance) {
     clientInstance = createClient(supabaseUrl, supabaseKey, {
       auth: {
         persistSession: true,
@@ -16,7 +16,7 @@ export function createClientSupabase() {
         detectSessionInUrl: true
       }
     })
-  }
+    }
 
-  return clientInstance
+    return clientInstance
 }

@@ -1,37 +1,55 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
-import { Skeleton } from "@/components/ui/skeleton"
-import { useRouter, usePathname } from "next/navigation"
+import type React from "react"
+
+import { useEffect, useState, useRef, useCallback } from "react"
+import { useRouter } from "next/navigation"
+import { cn } from "@/lib/utils"
+import { createClientSupabase } from "@/lib/supabase-client"
 
 interface VideoPlayerProps {
   videoId: string
   videoUrl?: string
   youtubeId?: string
   isUploaded?: boolean
+  recommendedVideos?: any[]
+  autoplayDelay?: number
 }
 
-export function VideoPlayer({ videoId, videoUrl, youtubeId, isUploaded }: VideoPlayerProps) {
+export function VideoPlayer({ videoId, videoUrl, youtubeId, isUploaded, recommendedVideos = [], autoplayDelay = 0 }: VideoPlayerProps) {
   const [isMounted, setIsMounted] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Custom video player hooks (declarados siempre)
+  // Custom video player hooks
   const [playing, setPlaying] = useState(true)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
 
-  // Mejorar barra de progreso: manejo de seek, arrastre, hover y buffering
+  // Progress bar and seeking
   const [isSeeking, setIsSeeking] = useState(false)
   const [seekTime, setSeekTime] = useState<number | null>(null)
   const [isBuffering, setIsBuffering] = useState(false)
   const [hoverTime, setHoverTime] = useState<number | null>(null)
-  const progressBarRef = useRef<HTMLInputElement>(null)
+  const [hoverPosition, setHoverPosition] = useState(0)
+  const progressBarRef = useRef<HTMLDivElement>(null)
 
-  // Volumen
+  // Volume controls
   const [volume, setVolume] = useState(1)
   const [isMuted, setIsMuted] = useState(false)
+  const [showVolumeSlider, setShowVolumeSlider] = useState(false)
+
+  // UI states
+  const [showControls, setShowControls] = useState(true)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [nextVideoId, setNextVideoId] = useState<string | null>(null)
+  const [showNoNextVideo, setShowNoNextVideo] = useState(false)
+  const [isTheaterMode, setIsTheaterMode] = useState(false)
+
+  const playerContainerRef = useRef<HTMLDivElement>(null)
+  const inactivityTimeout = useRef<NodeJS.Timeout | null>(null)
+  const router = useRouter()
 
   // Play/pause handler
   const togglePlay = () => {
@@ -62,100 +80,56 @@ export function VideoPlayer({ videoId, videoUrl, youtubeId, isUploaded }: VideoP
   const handleWaiting = () => setIsBuffering(true)
   const handlePlaying = () => setIsBuffering(false)
 
-  // Seek handlers
-  const handleSeekMouseDown = () => setIsSeeking(true)
-  const handleSeekMouseUp = (e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
-    setIsSeeking(false)
-    let value = 0
-    if ('changedTouches' in e) {
-      // TouchEvent
-      const touch = e.changedTouches[0]
-      if (progressBarRef.current && duration) {
-        const rect = progressBarRef.current.getBoundingClientRect()
-        const x = touch.clientX - rect.left
-        const percent = Math.min(Math.max(x / rect.width, 0), 1)
-        value = percent * duration
-      }
-    } else {
-      // MouseEvent
-      if (progressBarRef.current && duration) {
-        const rect = progressBarRef.current.getBoundingClientRect()
-        const x = (e as React.MouseEvent<HTMLInputElement>).clientX - rect.left
-        const percent = Math.min(Math.max(x / rect.width, 0), 1)
-        value = percent * duration
-      }
-    }
-    if (videoRef.current) {
-      videoRef.current.currentTime = value
-    }
-    setCurrentTime(value)
-    setSeekTime(null)
-  }
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const time = Number(e.target.value)
-    if (videoRef.current) {
-      videoRef.current.currentTime = time
-    }
-    setCurrentTime(time)
-    setSeekTime(null)
-  }
-
-  // Hover preview (solo tiempo)
-  const handleProgressBarMouseMove = (e: React.MouseEvent<HTMLInputElement>) => {
+  // Progress bar interaction
+  const handleProgressBarMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!progressBarRef.current || duration === 0) return
     const rect = progressBarRef.current.getBoundingClientRect()
     const x = e.clientX - rect.left
     const percent = Math.min(Math.max(x / rect.width, 0), 1)
     setHoverTime(percent * duration)
-  }
-  const handleProgressBarMouseLeave = () => setHoverTime(null)
-
-  // Actualiza el valor del input range mientras se arrastra
-  const progressValue = isSeeking && seekTime !== null ? seekTime : currentTime
-
-  // Play/pause state sync
-  useEffect(() => {
-    if (!videoRef.current) return
-    if (playing) {
-      videoRef.current.play()
-    } else {
-      videoRef.current.pause()
-    }
-  }, [playing])
-
-  // Format time helper
-  const formatTime = (time: number) => {
-    const minutes = Math.floor(time / 60)
-    const seconds = Math.floor(time % 60)
-    return `${minutes}:${seconds.toString().padStart(2, "0")}`
+    setHoverPosition(percent * 100)
   }
 
-  // Sincronizar volumen y mute con el video
-  useEffect(() => {
+  const handleProgressBarClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!progressBarRef.current || !videoRef.current || duration === 0) return
+    const rect = progressBarRef.current.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const percent = Math.min(Math.max(x / rect.width, 0), 1)
+    const time = percent * duration
+    videoRef.current.currentTime = time
+    setCurrentTime(time)
+  }
+
+  const handleProgressBarMouseLeave = () => {
+    setHoverTime(null)
+    setHoverPosition(0)
+  }
+
+  // Volume controls
+  const handleVolumeChange = (newVolume: number) => {
+    setVolume(newVolume)
+    setIsMuted(newVolume === 0)
     if (videoRef.current) {
-      videoRef.current.volume = volume
-      videoRef.current.muted = isMuted
+      videoRef.current.volume = newVolume
+      videoRef.current.muted = newVolume === 0
     }
-  }, [volume, isMuted])
-
-  // Cambiar volumen
-  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setVolume(Number(e.target.value))
-    if (Number(e.target.value) === 0) setIsMuted(true)
-    else setIsMuted(false)
   }
 
-  // Mute/unmute
   const toggleMute = () => {
-    setIsMuted((prev) => !prev)
-    if (videoRef.current && videoRef.current.volume === 0) {
-      setVolume(0.5)
+    const newMuted = !isMuted
+    setIsMuted(newMuted)
+    if (videoRef.current) {
+      videoRef.current.muted = newMuted
+      if (newMuted && volume > 0) {
+        videoRef.current.dataset.previousVolume = volume.toString()
+      } else if (!newMuted && volume === 0) {
+        const prevVolume = Number.parseFloat(videoRef.current.dataset.previousVolume || "0.5")
+        handleVolumeChange(prevVolume)
+      }
     }
   }
 
-  // Pantalla completa
-  const [isFullscreen, setIsFullscreen] = useState(false)
-  const playerContainerRef = useRef<HTMLDivElement>(null)
+  // Fullscreen
   const handleFullscreen = () => {
     const el = playerContainerRef.current
     if (!el) return
@@ -167,113 +141,91 @@ export function VideoPlayer({ videoId, videoUrl, youtubeId, isUploaded }: VideoP
       setIsFullscreen(false)
     }
   }
-  useEffect(() => {
-    const onFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement)
-    }
-    document.addEventListener('fullscreenchange', onFullscreenChange)
-    return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
-  }, [])
 
-  // Picture-in-Picture nativo
+  // Picture-in-Picture
   const handlePiP = async () => {
     if (videoRef.current) {
-      // @ts-ignore
       if (document.pictureInPictureElement) {
-        // @ts-ignore
-        document.exitPictureInPicture()
+        await document.exitPictureInPicture()
       } else if (videoRef.current.requestPictureInPicture) {
-        // @ts-ignore
         await videoRef.current.requestPictureInPicture()
       }
     }
   }
 
-  // Atajos de teclado (sin miniplayer)
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.target && (e.target as HTMLElement).tagName === 'INPUT') return
-      switch (e.key.toLowerCase()) {
-        case ' ': e.preventDefault(); togglePlay(); break
-        case 'arrowright': if (videoRef.current) videoRef.current.currentTime += 5; break
-        case 'arrowleft': if (videoRef.current) videoRef.current.currentTime -= 5; break
-        case 'm': toggleMute(); break
-        case 'f': handleFullscreen(); break
-        case 'p': handlePiP(); break
-      }
-    }
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
-  })
+  // Theater mode
+  const toggleTheaterMode = () => {
+    setIsTheaterMode(!isTheaterMode)
+  }
 
-  useEffect(() => {
-    console.log("VideoPlayer mounted");
-    setIsMounted(true);
-
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-      console.log("Loading finished");
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, []);
-
-  // --- Siguiente video automático ---
-  const [nextVideoId, setNextVideoId] = useState<string | null>(null)
-
-  // Buscar el siguiente video recomendado al cargar el video actual
-  useEffect(() => {
-    async function fetchNextVideo() {
-      // Si es un video de YouTube, puedes buscar relacionados por API, pero aquí solo ejemplo con base de datos
-      if (isUploaded) {
-        try {
-          const res = await fetch(`/api/youtube/related?videoId=${videoId}`)
-          const data = await res.json()
-          if (data && data.length > 0) {
-            setNextVideoId(data[0].id)
-          } else {
-            setNextVideoId(null)
-          }
-        } catch {
-          setNextVideoId(null)
-        }
-      } else if (youtubeId) {
-        // Si es YouTube, puedes usar la API de relacionados
-        try {
-          const res = await fetch(`/api/youtube/related?videoId=${youtubeId}`)
-          const data = await res.json()
-          if (data && data.length > 0) {
-            setNextVideoId(data[0].id)
-          } else {
-            setNextVideoId(null)
-          }
-        } catch {
-          setNextVideoId(null)
-        }
-      } else {
-        setNextVideoId(null)
-      }
-    }
-    fetchNextVideo()
-  }, [videoId, youtubeId, isUploaded])
-
-  // Al terminar el video, ir al siguiente automáticamente
-  const router = useRouter()
-  const handleEnded = () => {
-    if (nextVideoId) {
-      setTimeout(() => {
-        router.push(`/watch/${nextVideoId}`)
-      }, 3000)
-    } else {
-      setShowNoNextVideo(true)
+  // Skip functions
+  const skipBackward = () => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10)
     }
   }
 
-  // Estado para mostrar controles
-  const [showControls, setShowControls] = useState(true)
-  const inactivityTimeout = useRef<NodeJS.Timeout | null>(null)
+  const skipForward = () => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 10)
+    }
+  }
 
-  // Manejar visibilidad de controles por inactividad
+  // Format time helper
+  const formatTime = (time: number) => {
+    if (isNaN(time)) return "0:00"
+    const hours = Math.floor(time / 3600)
+    const minutes = Math.floor((time % 3600) / 60)
+    const seconds = Math.floor(time % 60)
+
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
+    }
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`
+  }
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.target && (e.target as HTMLElement).tagName === "INPUT") return
+
+      switch (e.key.toLowerCase()) {
+        case " ":
+          e.preventDefault()
+          togglePlay()
+          break
+        case "arrowright":
+          e.preventDefault()
+          skipForward()
+          break
+        case "arrowleft":
+          e.preventDefault()
+          skipBackward()
+          break
+        case "m":
+          e.preventDefault()
+          toggleMute()
+          break
+        case "f":
+          e.preventDefault()
+          handleFullscreen()
+          break
+        case "t":
+          e.preventDefault()
+          toggleTheaterMode()
+          break
+        case "p":
+          e.preventDefault()
+          handlePiP()
+          break
+      }
+    }
+
+    window.addEventListener("keydown", handleKey)
+    return () => window.removeEventListener("keydown", handleKey)
+  }, [playing])
+
+  // Controls visibility
   useEffect(() => {
     if (!playing) {
       setShowControls(true)
@@ -283,273 +235,442 @@ export function VideoPlayer({ videoId, videoUrl, youtubeId, isUploaded }: VideoP
       }
       return
     }
+
     const handleMouseMove = () => {
       setShowControls(true)
       if (inactivityTimeout.current) clearTimeout(inactivityTimeout.current)
       inactivityTimeout.current = setTimeout(() => {
         setShowControls(false)
-      }, 2000)
+      }, 3000)
     }
+
     const container = playerContainerRef.current
     if (container) {
-      container.addEventListener('mousemove', handleMouseMove)
-      container.addEventListener('mouseleave', () => setShowControls(false))
+      container.addEventListener("mousemove", handleMouseMove)
+      container.addEventListener("mouseleave", () => setShowControls(false))
     }
+
     return () => {
       if (container) {
-        container.removeEventListener('mousemove', handleMouseMove)
-        container.removeEventListener('mouseleave', () => setShowControls(false))
+        container.removeEventListener("mousemove", handleMouseMove)
+        container.removeEventListener("mouseleave", () => setShowControls(false))
       }
       if (inactivityTimeout.current) clearTimeout(inactivityTimeout.current)
     }
   }, [playing])
 
-  const [showNoNextVideo, setShowNoNextVideo] = useState(false)
+  // Fullscreen change listener
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+    }
+    document.addEventListener("fullscreenchange", onFullscreenChange)
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange)
+  }, [])
+
+  // Mount and loading
+  useEffect(() => {
+    setIsMounted(true)
+    const timer = setTimeout(() => {
+      setIsLoading(false)
+    }, 1000)
+    return () => clearTimeout(timer)
+  }, [])
+
+  // Sync volume with video element
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.volume = volume
+      videoRef.current.muted = isMuted
+    }
+  }, [volume, isMuted])
+
+  // Auto-next video logic
+  const currentIndex = recommendedVideos.findIndex(v => v.id === videoId);
+  const nextVideo = currentIndex >= 0 && currentIndex < recommendedVideos.length - 1 ? recommendedVideos[currentIndex + 1] : null;
+
+  const handleEnded = useCallback(() => {
+    if (nextVideo) {
+      setTimeout(() => {
+        router.push(`/watch/${nextVideo.id}`);
+      }, autoplayDelay);
+    } else {
+      setShowNoNextVideo(true);
+    }
+  }, [nextVideo, router, autoplayDelay]);
+
+  useEffect(() => {
+    // Solo trackear vistas de videos de la base de datos (UUID v4)
+    if (!videoId || videoId.length !== 36) return
+    const supabase = createClientSupabase()
+    supabase.auth.getUser().then(({ data }) => {
+      const userId = data?.user?.id ?? null
+      supabase.from("video_views").insert({
+        video_id: videoId,
+        user_id: userId,
+      }).then(({ error }) => {
+        if (error) {
+          console.error("Error insertando view:", error)
+        } else {
+          console.log("View insertada correctamente")
+        }
+      })
+    })
+  }, [videoId])
 
   if (!isMounted) {
-    return <div className="aspect-video bg-muted animate-pulse rounded-lg" />
+    return (
+      <div className="aspect-video bg-gradient-to-br from-slate-900 to-slate-800 animate-pulse rounded-xl shadow-2xl" />
+    )
   }
 
   if (isLoading) {
-    return <Skeleton className="aspect-video rounded-lg" />
-  }
-
-  // If it's a YouTube video
-  if (youtubeId) {
     return (
-      <div className="aspect-video rounded-lg overflow-hidden">
-        <iframe
-          width="100%"
-          height="100%"
-          src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1`}
-          title="YouTube video player"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen
-        ></iframe>
+      <div className="aspect-video rounded-xl overflow-hidden bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center shadow-2xl">
+        <div className="flex flex-col items-center space-y-4">
+          <div className="w-16 h-16 border-4 border-red-500/30 border-t-red-500 rounded-full animate-spin" />
+          <div className="text-white/80 font-medium">Loading video...</div>
+        </div>
       </div>
     )
   }
 
-  // If it's an uploaded video
-  if (isUploaded && videoUrl) {
+  // YouTube player
+  if (youtubeId) {
+    return (
+      <div
+        className={cn(
+          "rounded-xl overflow-hidden shadow-2xl transition-all duration-500",
+          isTheaterMode ? "aspect-[21/9]" : "aspect-video",
+        )}
+      >
+        <iframe
+          width="100%"
+          height="100%"
+          src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&modestbranding=1&rel=0`}
+          title="YouTube video player"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+          className="w-full h-full"
+        />
+      </div>
+    )
+  }
+
+  // Custom video player
+  if ((isUploaded && videoUrl) || videoUrl) {
     return (
       <div
         ref={playerContainerRef}
-        className="aspect-video rounded-lg overflow-hidden bg-black relative flex flex-col transition-all duration-300"
+        className={cn(
+          "relative rounded-xl overflow-hidden bg-black shadow-2xl transition-all duration-500 group",
+          isTheaterMode ? "aspect-[21/9]" : "aspect-video",
+          isFullscreen && "!aspect-auto !rounded-none",
+        )}
       >
+        {/* Video Element */}
         <video
           ref={videoRef}
           src={videoUrl}
           autoPlay
-          poster={`https://image.mux.com/${videoId}/thumbnail.jpg`}
-          className="w-full h-full"
+          poster={isUploaded ? `https://image.mux.com/${videoId}/thumbnail.jpg` : undefined}
+          className="w-full h-full object-cover"
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           onError={() => setError("Video could not be loaded")}
           onClick={togglePlay}
-          tabIndex={0}
           onWaiting={handleWaiting}
           onPlaying={handlePlaying}
           onEnded={handleEnded}
+        />
+
+        {/* Buffering Overlay */}
+        {isBuffering && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div className="flex flex-col items-center space-y-3">
+              <div className="w-12 h-12 border-3 border-white/30 border-t-white rounded-full animate-spin" />
+              <span className="text-white/90 text-sm font-medium">Buffering...</span>
+            </div>
+          </div>
+        )}
+
+        {/* Center Play Button */}
+        {!playing && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <button
+              onClick={togglePlay}
+              className="w-20 h-20 bg-white/20 backdrop-blur-md border border-white/30 rounded-full flex items-center justify-center hover:bg-white/30 hover:scale-110 transition-all duration-300 shadow-2xl"
+            >
+              <svg width="32" height="32" fill="white" viewBox="0 0 24 24" className="ml-1">
+                <polygon points="5,3 19,12 5,21" />
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {/* Controls Overlay */}
+        <div
+          className={cn(
+            "absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent transition-all duration-300",
+            showControls ? "opacity-100" : "opacity-0 pointer-events-none",
+          )}
         >
-          Your browser does not support the video tag.
-        </video>
-        {showControls && (
-          <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/80 to-transparent px-4 pb-2 pt-6 flex flex-col transition-opacity duration-300" style={{opacity: showControls ? 1 : 0}}>
+          {/* Top Controls */}
+          <div className="absolute top-4 right-4 flex items-center space-x-2">
+            <button
+              onClick={toggleTheaterMode}
+              className="p-2 bg-black/50 backdrop-blur-md border border-white/20 rounded-lg text-white hover:bg-black/70 transition-all duration-200"
+              title="Theater Mode (T)"
+            >
+              <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+                <rect x="2" y="6" width="20" height="12" rx="2" stroke="currentColor" strokeWidth="2" fill="none" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Bottom Controls */}
+          <div className="absolute bottom-0 left-0 right-0 p-6">
             {/* Progress Bar */}
-            <div className="relative w-full flex items-center h-8">
-              <input
+            <div className="mb-6">
+              <div
                 ref={progressBarRef}
-                type="range"
-                min={0}
-                max={duration}
-                step={0.1}
-                value={progressValue}
-                onChange={(e) => {
-                  setSeekTime(Number(e.target.value))
-                  handleSeek(e)
-                }}
-                onMouseDown={handleSeekMouseDown}
-                onMouseUp={handleSeekMouseUp}
-                onTouchStart={handleSeekMouseDown}
-                onTouchEnd={handleSeekMouseUp}
+                className="relative h-2 bg-white/20 rounded-full cursor-pointer group/progress"
                 onMouseMove={handleProgressBarMouseMove}
                 onMouseLeave={handleProgressBarMouseLeave}
-                className="w-full h-2 bg-white rounded-full appearance-none outline-none cursor-pointer relative z-10"
-                style={{
-                  background: `linear-gradient(to right, #ef4444 ${(progressValue/duration)*100}%, #fff ${(progressValue/duration)*100}%)`,
-                }}
-              />
-              {/* Ocultar el thumb del input range en todos los navegadores */}
-              <style jsx>{`
-                input[type='range']::-webkit-slider-thumb {
-                  -webkit-appearance: none;
-                  appearance: none;
-                  width: 0;
-                  height: 0;
-                  background: transparent;
-                  border: none;
-                  box-shadow: none;
-                }
-                input[type='range']:focus::-webkit-slider-thumb {
-                  outline: none;
-                }
-                input[type='range']::-moz-range-thumb {
-                  width: 0;
-                  height: 0;
-                  background: transparent;
-                  border: none;
-                  box-shadow: none;
-                }
-                input[type='range']:focus::-moz-range-thumb {
-                  outline: none;
-                }
-                input[type='range']::-ms-thumb {
-                  width: 0;
-                  height: 0;
-                  background: transparent;
-                  border: none;
-                  box-shadow: none;
-                }
-                input[type='range']:focus::-ms-thumb {
-                  outline: none;
-                }
-                input[type='range']::-webkit-slider-runnable-track {
-                  height: 8px;
-                  border-radius: 4px;
-                }
-                input[type='range']::-ms-fill-lower {
-                  background: #ef4444;
-                  border-radius: 4px;
-                }
-                input[type='range']::-ms-fill-upper {
-                  background: #fff;
-                  border-radius: 4px;
-                }
-              `}</style>
-              {/* Hover time preview */}
-              {hoverTime !== null && (
+                onClick={handleProgressBarClick}
+              >
+                {/* Progress Track */}
                 <div
-                  className="absolute -top-6 left-0 text-xs text-white bg-black/80 px-2 py-1 rounded shadow pointer-events-none"
-                  style={{ left: `calc(${(hoverTime/duration)*100}% - 20px)` }}
-                >
-                  {formatTime(hoverTime)}
-                </div>
-              )}
+                  className="absolute top-0 left-0 h-full bg-gradient-to-r from-red-500 to-red-600 rounded-full transition-all duration-150"
+                  style={{ width: `${(currentTime / duration) * 100}%` }}
+                />
+
+                {/* Progress Handle */}
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-lg opacity-0 group-hover/progress:opacity-100 transition-all duration-200 transform -translate-x-1/2"
+                  style={{ left: `${(currentTime / duration) * 100}%` }}
+                />
+
+                {/* Hover Preview */}
+                {hoverTime !== null && (
+                  <div
+                    className="absolute -top-10 bg-black/80 backdrop-blur-md text-white text-xs px-2 py-1 rounded-md shadow-lg pointer-events-none transform -translate-x-1/2"
+                    style={{ left: `${hoverPosition}%` }}
+                  >
+                    {formatTime(hoverTime)}
+                  </div>
+                )}
+              </div>
             </div>
-            {/* Controls */}
-            <div className="flex items-center gap-4 mt-2 w-full justify-between">
-              <div className="flex items-center gap-2">
+
+            {/* Control Buttons */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
                 {/* Play/Pause */}
                 <button
                   onClick={togglePlay}
-                  className="text-white focus:outline-none hover:scale-110 transition-transform"
-                  aria-label={playing ? "Pause" : "Play"}
+                  className="p-2 text-white hover:scale-110 transition-transform duration-200"
+                  title={playing ? "Pause (Space)" : "Play (Space)"}
                 >
                   {playing ? (
-                    <svg width="28" height="28" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1.5"/><rect x="14" y="5" width="4" height="14" rx="1.5"/></svg>
+                    <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
+                      <rect x="6" y="5" width="4" height="14" rx="1" />
+                      <rect x="14" y="5" width="4" height="14" rx="1" />
+                    </svg>
                   ) : (
-                    <svg width="28" height="28" fill="currentColor" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+                    <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
+                      <polygon points="5,3 19,12 5,21" />
+                    </svg>
                   )}
                 </button>
-                {/* Volume */}
+
+                {/* Skip Backward */}
                 <button
-                  onClick={toggleMute}
-                  className="text-white focus:outline-none hover:scale-110 transition-transform"
-                  aria-label={isMuted || volume === 0 ? "Unmute" : "Mute"}
+                  onClick={skipBackward}
+                  className="p-2 text-white hover:scale-110 transition-transform duration-200"
+                  title="Skip backward 10s (←)"
                 >
-                  {isMuted || volume === 0 ? (
-                    <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24"><path d="M16.5 12a4.5 4.5 0 0 0-4.5-4.5v9a4.5 4.5 0 0 0 4.5-4.5zm-6.5 4h-4v-8h4l5-5v18l-5-5z"/><line x1="19" y1="5" x2="5" y2="19" stroke="currentColor" strokeWidth="2"/></svg>
-                  ) : volume < 0.5 ? (
-                    <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07" stroke="currentColor" strokeWidth="2" fill="none"/></svg>
-                  ) : (
-                    <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14" stroke="currentColor" strokeWidth="2" fill="none"/></svg>
-                  )}
+                  <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z" />
+                    <text x="12" y="15" textAnchor="middle" fontSize="8" fill="currentColor">
+                      10
+                    </text>
+                  </svg>
                 </button>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={isMuted ? 0 : volume}
-                  onChange={handleVolumeChange}
-                  className="w-20 h-1 accent-red-600 mx-2 cursor-pointer"
-                />
-                {/* Botón PiP */}
+
+                {/* Skip Forward */}
+                <button
+                  onClick={skipForward}
+                  className="p-2 text-white hover:scale-110 transition-transform duration-200"
+                  title="Skip forward 10s (→)"
+                >
+                  <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z" />
+                    <text x="12" y="15" textAnchor="middle" fontSize="8" fill="currentColor">
+                      10
+                    </text>
+                  </svg>
+                </button>
+
+                {/* Volume Controls */}
+                <div
+                  className="flex items-center space-x-2"
+                  onMouseEnter={() => setShowVolumeSlider(true)}
+                  onMouseLeave={() => setShowVolumeSlider(false)}
+                >
+                  <button
+                    onClick={toggleMute}
+                    className="p-2 text-white hover:scale-110 transition-transform duration-200"
+                    title={isMuted ? "Unmute (M)" : "Mute (M)"}
+                  >
+                    {isMuted || volume === 0 ? (
+                      <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
+                      </svg>
+                    ) : volume < 0.5 ? (
+                      <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z" />
+                      </svg>
+                    ) : (
+                      <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+                      </svg>
+                    )}
+                  </button>
+
+                  {/* Volume Slider */}
+                  <div
+                    className={cn(
+                      "transition-all duration-300 overflow-hidden",
+                      showVolumeSlider ? "w-20 opacity-100" : "w-0 opacity-0",
+                    )}
+                  >
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={isMuted ? 0 : volume}
+                      onChange={(e) => handleVolumeChange(Number(e.target.value))}
+                      className="w-full h-1 bg-white/30 rounded-full appearance-none cursor-pointer slider"
+                    />
+                  </div>
+                </div>
+
+                {/* Time Display */}
+                <span className="text-white/90 text-sm font-mono">
+                  {formatTime(currentTime)} / {formatTime(duration)}
+                </span>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                {/* Picture in Picture */}
                 <button
                   onClick={handlePiP}
-                  className="text-white focus:outline-none hover:scale-110 transition-transform"
-                  aria-label="Picture in Picture"
+                  className="p-2 bg-black/30 backdrop-blur-md border border-white/20 rounded-lg text-white hover:bg-black/50 transition-all duration-200"
+                  title="Picture in Picture (P)"
                 >
-                  <svg width="22" height="22" fill="currentColor" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><rect x="13" y="13" width="6" height="4" rx="1" fill="#ef4444"/></svg>
+                  <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24">
+                    <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="2" fill="none" />
+                    <rect x="13" y="13" width="6" height="4" rx="1" fill="currentColor" />
+                  </svg>
                 </button>
-                {/* Botón pantalla completa */}
+
+                {/* Fullscreen */}
                 <button
                   onClick={handleFullscreen}
-                  className="text-white focus:outline-none hover:scale-110 transition-transform"
-                  aria-label="Pantalla completa"
+                  className="p-2 bg-black/30 backdrop-blur-md border border-white/20 rounded-lg text-white hover:bg-black/50 transition-all duration-200"
+                  title="Fullscreen (F)"
                 >
                   {isFullscreen ? (
-                    <svg width="22" height="22" fill="currentColor" viewBox="0 0 24 24"><path d="M9 9L5 5M5 5v4M5 5h4M15 9l4-4m0 0v4m0-4h-4M9 15l-4 4m0 0v-4m0 4h4m6-4l4 4m0 0v-4m0 4h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                    <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" />
+                    </svg>
                   ) : (
-                    <svg width="22" height="22" fill="currentColor" viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 0 0-2 2v4m0 8v4a2 2 0 0 0 2 2h4m6-18h4a2 2 0 0 1 2 2v4m0 8v4a2 2 0 0 1-2 2h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                    <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
+                    </svg>
                   )}
                 </button>
+
+                {/* Next Video Button */}
+                {nextVideo && (
+                  <button
+                    onClick={() => router.push(`/watch/${nextVideo.id}`)}
+                    className="px-4 py-2 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-lg font-medium hover:from-red-600 hover:to-red-700 transition-all duration-200 shadow-lg"
+                  >
+                    Next Video →
+                  </button>
+                )}
               </div>
-              {/* Time */}
-              <span className="text-xs text-white font-mono">
-                {formatTime(progressValue)} / {formatTime(duration)}
-              </span>
-              {/* Buffering */}
-              {isBuffering && <span className="text-xs text-yellow-400 ml-2">Cargando...</span>}
-              {/* Siguiente video */}
-              {nextVideoId && (
-                <button
-                  onClick={() => router.push(`/watch/${nextVideoId}`)}
-                  className="text-xs text-white bg-red-600 hover:bg-red-700 rounded px-3 py-1 ml-4"
-                >
-                  Siguiente video ▶
-                </button>
-              )}
+            </div>
+          </div>
+        </div>
+
+        {/* No Next Video Overlay */}
+        {showNoNextVideo && recommendedVideos.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+            <div className="text-center text-white">
+              <div className="text-2xl font-bold mb-2">🎬</div>
+              <div className="text-lg font-semibold mb-1">That's all for now!</div>
+              <div className="text-white/70">No more recommended videos</div>
             </div>
           </div>
         )}
-        {showNoNextVideo && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/70 text-white text-lg font-bold z-20">
-            No hay video recomendado para reproducir.
+
+        {/* Error State */}
+        {error && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+            <div className="text-center text-white">
+              <div className="text-4xl mb-4">⚠️</div>
+              <div className="text-lg font-semibold mb-2">Video Error</div>
+              <div className="text-white/70">{error}</div>
+            </div>
           </div>
         )}
-        {error && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-white">{error}</div>
-        )}
-      </div>
-    )
-  }
 
-  // If it's a video from an external URL
-  if (videoUrl) {
-    return (
-      <div className="aspect-video rounded-lg overflow-hidden bg-black">
-        <video
-          src={videoUrl}
-          controls
-          autoPlay
-          className="w-full h-full"
-          onError={() => setError("Video could not be loaded")}
-        >
-          Your browser does not support the video tag.
-        </video>
-        {error && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-white">{error}</div>
-        )}
+        {/* Custom Styles */}
+        <style jsx>{`
+          .slider::-webkit-slider-thumb {
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            background: white;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+          }
+          .slider::-webkit-slider-track {
+            background: linear-gradient(to right, #ef4444 0%, #ef4444 var(--progress, 0%), rgba(255,255,255,0.3) var(--progress, 0%), rgba(255,255,255,0.3) 100%);
+            height: 4px;
+            border-radius: 2px;
+          }
+          .slider::-moz-range-thumb {
+            width: 12px;
+            height: 12px;
+            background: white;
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+          }
+          .slider::-moz-range-track {
+            background: rgba(255,255,255,0.3);
+            height: 4px;
+            border-radius: 2px;
+          }
+        `}</style>
       </div>
     )
   }
 
   // Fallback
   return (
-    <div className="aspect-video bg-muted rounded-lg flex items-center justify-center">
-      <p className="text-muted-foreground">Video not available</p>
+    <div className="aspect-video bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl flex items-center justify-center shadow-2xl">
+      <div className="text-center text-white/70">
+        <div className="text-4xl mb-4">📹</div>
+        <p className="text-lg font-medium">Video not available</p>
+      </div>
     </div>
   )
 }

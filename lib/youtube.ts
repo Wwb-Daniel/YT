@@ -1,7 +1,7 @@
 // Replace the entire file with this updated version that uses the real YouTube API
 
 // YouTube API key
-const API_KEY = process.env.YOUTUBE_API_KEY || "AIzaSyAmau-y2nqiKErgM4UClQA5R9TzMrxfL7w"
+const API_KEY = typeof process !== 'undefined' && process.env.YOUTUBE_API_KEY ? process.env.YOUTUBE_API_KEY : "AIzaSyAmau-y2nqiKErgM4UClQA5R9TzMrxfL7w"
 const BASE_URL = "https://www.googleapis.com/youtube/v3"
 
 // Function to get popular videos with pagination

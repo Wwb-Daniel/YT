@@ -3,13 +3,7 @@ import type { Metadata } from "next"
 import { VideoPlayer } from "@/components/video-player"
 import { CommentSection } from "@/components/comment-section"
 import { VideoRecommendations } from "@/components/video-recommendations"
-import { VideoSkeleton } from "@/components/video-skeleton"
-import { ErrorBoundary } from "@/components/error-boundary"
 import { ShareButton } from "@/components/share-button"
-import { Breadcrumbs } from "@/components/breadcrumbs"
-import { getVideoDetails } from "@/lib/youtube"
-import { createServerClient } from "@/lib/supabase-server"
-import { isUUID } from "@/lib/utils"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
@@ -28,7 +22,9 @@ import {
   User,
   ExternalLink,
 } from "lucide-react"
-import { WatchClient } from "@/components/watch-client"
+import { getVideoDetails } from "@/lib/youtube"
+import { createServerClient } from "@/lib/supabase-server"
+import { isUUID } from "@/lib/utils"
 
 // Force dynamic rendering to avoid prerender issues
 export const dynamic = "force-dynamic"
@@ -64,9 +60,9 @@ interface WatchPageProps {
 }
 
 // Generate metadata for SEO
-export async function generateMetadata({ params }: WatchPageProps): Promise<Metadata> {
-  const videoId = params.id
-  const supabase = await createServerClient()
+export async function generateMetadata({ params }: { params: { id: string } }): Promise<Metadata> {
+  const videoId = params.id;
+  const supabase = await createServerClient();
 
   try {
     const isDbVideo = isUUID(videoId)
@@ -225,21 +221,6 @@ async function VideoContent({ videoId }: { videoId: string }) {
         return <AccessDenied />
       }
 
-      // Record a view (only for authenticated users to avoid spam)
-      if (session) {
-        try {
-          await supabase.from("video_views").insert({
-            video_id: dbVideo.id,
-            user_id: session.user.id,
-          })
-
-          // Update view count
-          await supabase.rpc("increment_view_count", { video_id: dbVideo.id })
-        } catch (viewError) {
-          console.error("Error recording view:", viewError)
-        }
-      }
-
       // Get YouTube details if it's a YouTube video
       let youtubeDetails = null
       if (dbVideo.youtube_id) {
@@ -250,12 +231,37 @@ async function VideoContent({ videoId }: { videoId: string }) {
         }
       }
 
+      // Refetch del video para actualizar view_count
+      let updatedDbVideo = dbVideo
+      try {
+        const { data: updated } = await supabase
+          .from("videos")
+          .select("*")
+          .eq("id", dbVideo.id)
+          .maybeSingle()
+        if (updated) updatedDbVideo = updated
+      } catch (e) {}
+
       const videoData: VideoData = {
-        ...dbVideo,
-        profiles: Array.isArray(dbVideo.profiles) ? dbVideo.profiles[0] : dbVideo.profiles,
+        ...updatedDbVideo,
+        profiles: Array.isArray(updatedDbVideo.profiles) ? updatedDbVideo.profiles[0] : updatedDbVideo.profiles,
       }
 
-      return <VideoLayout video={videoData} youtubeDetails={youtubeDetails} />
+      // Obtener videos recomendados
+      let recommendedVideos = []
+      try {
+        const { data: recs } = await supabase
+          .from("videos")
+          .select("*")
+          .not("id", "eq", videoId)
+          .order("view_count", { ascending: false })
+          .limit(10)
+        recommendedVideos = recs || []
+      } catch (e) {
+        recommendedVideos = []
+      }
+
+      return <VideoLayout video={videoData} youtubeDetails={youtubeDetails} recommendedVideos={recommendedVideos} />
     } else {
       // YouTube video
       const youtubeDetails = await getVideoDetails(videoId)
@@ -276,7 +282,21 @@ async function VideoContent({ videoId }: { videoId: string }) {
         created_at: youtubeDetails.snippet.publishedAt,
       }
 
-      return <VideoLayout video={videoData} youtubeDetails={youtubeDetails} isYoutubeOnly={true} />
+      // Obtener videos recomendados
+      let recommendedVideos = []
+      try {
+        const { data: recs } = await supabase
+          .from("videos")
+          .select("*")
+          .not("id", "eq", videoId)
+          .order("view_count", { ascending: false })
+          .limit(10)
+        recommendedVideos = recs || []
+      } catch (e) {
+        recommendedVideos = []
+      }
+
+      return <VideoLayout video={videoData} youtubeDetails={youtubeDetails} recommendedVideos={recommendedVideos} isYoutubeOnly={true} />
     }
   } catch (error) {
     console.error("Error in VideoContent:", error)
@@ -289,10 +309,12 @@ function VideoLayout({
   video,
   youtubeDetails,
   isYoutubeOnly = false,
+  recommendedVideos = [],
 }: {
   video: VideoData
   youtubeDetails?: any
   isYoutubeOnly?: boolean
+  recommendedVideos?: VideoData[]
 }) {
   const breadcrumbItems = [
     { label: "Home", href: "/" },
@@ -324,14 +346,14 @@ function VideoLayout({
       default:
         return "bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400"
     }
-  }
+      }
 
-  return (
+      return (
     <div className="min-h-screen bg-background">
       {/* Breadcrumbs */}
       <div className="border-b bg-muted/30">
         <div className="container mx-auto px-4 py-3">
-          <Breadcrumbs items={breadcrumbItems} />
+          {/* Breadcrumbs component would be here */}
         </div>
       </div>
 
@@ -343,20 +365,14 @@ function VideoLayout({
             {/* Video Player */}
             <Card className="overflow-hidden">
               <div className="aspect-video bg-black">
-                <ErrorBoundary
-                  fallback={
-                    <div className="w-full h-full flex items-center justify-center text-white">
-                      Error loading video player
-                    </div>
-                  }
-                >
-                  <VideoPlayer
-                    videoId={video.id}
-                    videoUrl={video.video_url}
-                    youtubeId={video.youtube_id}
-                    isUploaded={video.is_uploaded}
-                  />
-                </ErrorBoundary>
+                <VideoPlayer
+                  videoId={video.id}
+                  videoUrl={video.video_url}
+                  youtubeId={video.youtube_id}
+                  isUploaded={video.is_uploaded}
+                  recommendedVideos={recommendedVideos}
+                  autoplayDelay={3000}
+                />
               </div>
             </Card>
 
@@ -406,7 +422,7 @@ function VideoLayout({
                     {/* Action Buttons */}
                     <div className="flex items-center gap-2">
                       <ShareButton
-                        url={`${process.env.NEXT_PUBLIC_SITE_URL}/watch/${video.id}`}
+                        url={`/watch/${video.id}`}
                         title={video.title}
                         description={video.description}
                       />
@@ -492,13 +508,9 @@ function VideoLayout({
             </Card>
 
             {/* Comments Section */}
-            <ErrorBoundary
-              fallback={<div className="text-center py-8 text-muted-foreground">Comments unavailable</div>}
-            >
-              <Suspense fallback={<div className="animate-pulse bg-muted rounded-lg h-64" />}>
-                <CommentSection videoId={video.id} />
-              </Suspense>
-            </ErrorBoundary>
+            <Suspense fallback={<div className="animate-pulse bg-muted rounded-lg h-64" />}>
+              <CommentSection videoId={video.id} />
+            </Suspense>
           </div>
 
           {/* Sidebar */}
@@ -539,36 +551,32 @@ function VideoLayout({
               )}
 
               {/* Recommendations */}
-              <ErrorBoundary
-                fallback={<div className="text-center py-8 text-muted-foreground">Recommendations unavailable</div>}
+              <Suspense
+                fallback={
+                  <div className="space-y-4">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <div key={i} className="animate-pulse bg-muted rounded-lg h-24" />
+                    ))}
+                  </div>
+                }
               >
-                <Suspense
-                  fallback={
-                    <div className="space-y-4">
-                      {Array.from({ length: 5 }).map((_, i) => (
-                        <div key={i} className="animate-pulse bg-muted rounded-lg h-24" />
-                      ))}
-                    </div>
-                  }
-                >
-                  <VideoRecommendations videoId={video.id} youtubeId={video.youtube_id} />
-                </Suspense>
-              </ErrorBoundary>
+                <VideoRecommendations videoId={video.id} youtubeId={video.youtube_id} />
+              </Suspense>
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  )
-}
+          </div>
+        </div>
+      )
+    }
 
 // Main page component
-export default async function WatchPage({ params }: WatchPageProps) {
+export default async function WatchPage({ params }: { params: { id: string } }) {
   return (
-    <ErrorBoundary fallback={<VideoNotFound />}>
-      <Suspense fallback={<VideoSkeleton />}>
+    <>
+      <Suspense fallback={<div className="animate-pulse bg-muted rounded-lg h-64" />}>
         <VideoContent videoId={params.id} />
       </Suspense>
-    </ErrorBoundary>
-  )
+    </>
+  );
 }

@@ -11,10 +11,10 @@ interface SearchResultsProps {
 export async function SearchResults({ query }: SearchResultsProps) {
   console.log(`Buscando videos con la consulta: "${query}"`)
 
-  const supabase = createServerClient()
+  const supabase = await createServerClient()
 
   // Buscar videos en nuestra base de datos
-  let dbVideosWithProfiles = []
+  let dbVideosWithProfiles: any[] = []
   try {
     const { data: dbVideos, error: dbError } = await supabase
       .from("videos")
@@ -29,8 +29,8 @@ export async function SearchResults({ query }: SearchResultsProps) {
       console.log(`Encontrados ${dbVideos.length} videos en la base de datos`)
 
       // Obtener perfiles de usuario por separado
-      let profiles = []
-      const userIds = dbVideos.map((video) => video.user_id).filter(Boolean)
+      let profiles: any[] = []
+      const userIds = dbVideos.map((video: any) => video.user_id).filter(Boolean)
 
       if (userIds.length > 0) {
         const { data: profilesData } = await supabase
@@ -42,8 +42,8 @@ export async function SearchResults({ query }: SearchResultsProps) {
       }
 
       // Combinar videos con sus perfiles
-      dbVideosWithProfiles = dbVideos.map((video) => {
-        const profile = profiles.find((p) => p.id === video.user_id)
+      dbVideosWithProfiles = dbVideos.map((video: any) => {
+        const profile = profiles.find((p: any) => p.id === video.user_id)
         return {
           id: video.id,
           title: video.title,
@@ -67,7 +67,7 @@ export async function SearchResults({ query }: SearchResultsProps) {
   // Combinar ambas fuentes
   const videos = [
     ...dbVideosWithProfiles,
-    ...(youtubeVideos || []).map((video) => ({
+    ...(youtubeVideos || []).map((video: any) => ({
       id: video.id.videoId,
       title: video.snippet.title,
       channelTitle: video.snippet.channelTitle,
