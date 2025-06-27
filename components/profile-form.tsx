@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useToast } from "@/components/ui/use-toast"
+import { AvatarUpload } from "./avatar-upload"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface ProfileFormProps {
   profile: any
@@ -24,29 +26,50 @@ export function ProfileForm({ profile }: ProfileFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!user) return
+    if (!user) {
+      toast({
+        title: "Error",
+        description: "No user found",
+        variant: "destructive",
+      })
+      return
+    }
 
     setIsLoading(true)
 
     try {
+      console.log("User ID:", user.id)
+      console.log("User email:", user.email)
       console.log("Updating profile:", { id: user.id, username, avatar_url: avatarUrl })
       
-      const { error, data } = await supabase
+      // Check current session
+      const { data: { session } } = await supabase.auth.getSession()
+      console.log("Current session:", session)
+      
+      // Prepare the update data - only use fields that exist in the table
+      const updateData = {
+        id: user.id,
+        username: username.trim(),
+        avatar_url: avatarUrl.trim() || null
+      }
+
+      console.log("Update data:", updateData)
+
+      // Use upsert to handle both insert and update
+      const result = await supabase
         .from("profiles")
-        .upsert({
-          id: user.id,
-          username,
-          avatar_url: avatarUrl,
-        })
+        .upsert(updateData)
         .select()
         .single()
 
-      if (error) {
-        console.error("Profile update error:", error)
-        throw error
+      console.log("Update result:", result)
+
+      if (result.error) {
+        console.error("Profile update error:", result.error)
+        throw new Error(result.error.message || "Failed to update profile")
       }
 
-      console.log("Profile updated successfully:", data)
+      console.log("Profile updated successfully:", result.data)
 
       // Refresh the profile state
       await refreshProfile()
@@ -67,6 +90,10 @@ export function ProfileForm({ profile }: ProfileFormProps) {
     }
   }
 
+  const handleAvatarChange = (newAvatarUrl: string) => {
+    setAvatarUrl(newAvatarUrl)
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <div className="flex items-center gap-4">
@@ -80,21 +107,39 @@ export function ProfileForm({ profile }: ProfileFormProps) {
         </div>
       </div>
 
+      <Tabs defaultValue="upload" className="w-full">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="upload">Upload Image</TabsTrigger>
+          <TabsTrigger value="url">URL</TabsTrigger>
+        </TabsList>
+        
+        <TabsContent value="upload" className="space-y-4">
+          <AvatarUpload
+            currentAvatarUrl={avatarUrl}
+            username={username}
+            onAvatarChange={handleAvatarChange}
+          />
+        </TabsContent>
+        
+        <TabsContent value="url" className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="avatar-url">Avatar URL</Label>
+            <Input
+              id="avatar-url"
+              type="url"
+              placeholder="https://example.com/avatar.jpg"
+              value={avatarUrl}
+              onChange={(e) => setAvatarUrl(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">Enter a URL for your profile picture</p>
+          </div>
+        </TabsContent>
+      </Tabs>
+
       <div className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="username">Username</Label>
           <Input id="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="avatar-url">Avatar URL</Label>
-          <Input
-            id="avatar-url"
-            type="url"
-            placeholder="https://example.com/avatar.jpg"
-            value={avatarUrl}
-            onChange={(e) => setAvatarUrl(e.target.value)}
-          />
-          <p className="text-xs text-muted-foreground">Enter a URL for your profile picture</p>
         </div>
       </div>
 
